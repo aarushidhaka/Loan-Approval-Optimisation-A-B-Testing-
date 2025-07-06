@@ -83,7 +83,7 @@ The project was part of the *Advanced Data Analysis* module at Warwick Business 
 ## 🚀 How to Run
 1. Clone the repository:
    ```bash
-   git clone https://github.com/<yourusername>/AI-Loan-Approval-A-B-Testing.git
+   git clone https://github.com/aarushidhaka/Loan-Approval-Optimisation-A-B-Testing-.git
    cd AI-Loan-Approval-A-B-Testing
 2. Open final_version.Rmd in RStudio.
 3. Knit the file to HTML or PDF to view the report.
