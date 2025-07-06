@@ -1,0 +1,287 @@
+---
+title: "final version"
+author: "aarushi"
+date: "2025-02-09"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(Hmisc)
+library(ggcorrplot)
+library(knitr)
+```
+
+```{r dataset, include=TRUE}
+
+#Loading the dataset
+data <- read.csv("ADA_project.csv")
+
+# Creating Data Dictionary Table
+data_dictionary <- data.frame(
+  Variable = c("Variant", "loanofficer_id", "day", 
+               "typeI_init", "typeI_fin", "typeII_init", "typeII_fin", 
+               "ai_typeI", "ai_typeII", "badloans_num", "goodloans_num",
+               "agree_init", "agree_fin", "conflict_init", "conflict_fin",
+               "revised_per_ai", "revised_agst_ai", "fully_complt",
+               "confidence_init_total", "confidence_fin_total",
+               "complt_init", "complt_fin"),
+  
+  Description = c(
+    "Experimental variant randomly assigned to each loan officer (Control/Treatment)",
+    "Unique identifier for each loan officer",
+    "Day of the experiment (e.g., 1 means 1st day, 2 means 2nd day, etc.)",
+    
+    "Count of Type I errors (false positives) before seeing AI predictions",
+    "Count of Type I errors (false positives) after seeing AI predictions",
+    "Count of Type II errors (false negatives) before seeing AI predictions",
+    "Count of Type II errors (false negatives) after seeing AI predictions",
+    
+    "Count of Type I errors made by AI model (false positives)",
+    "Count of Type II errors made by AI model (false negatives)",
+    "Number of bad loans (loans that defaulted)",
+    "Number of good loans (loans repaid on time)",
+    
+    "Count of agreements with AI predictions before seeing AI predictions",
+    "Count of agreements with AI predictions after seeing AI predictions",
+    "Count of conflicts with AI predictions before seeing AI predictions",
+    "Count of conflicts with AI predictions after seeing AI predictions",
+    
+    "Count of decisions revised to follow AI predictions",
+    "Count of decisions revised against AI predictions",
+    "Total count of fully completed loan reviews (both before & after AI predictions)",
+    
+    "Sum of confidence ratings before seeing AI predictions",
+    "Sum of confidence ratings after seeing AI predictions",
+    
+    "Count of loan reviews completed before AI predictions",
+    "Count of loan reviews completed after AI predictions"
+  )
+)
+
+# Display Data Dictionary
+kable(data_dictionary, align = "l", caption = "Data Dictionary")
+
+```
+
+```{r dataset summary, echo=TRUE}
+# Displaying summary statistics for numerical columns
+print("SUMMARY STATISTICS:")
+summary(data)
+```
+
+```{r data cleaning, echo=TRUE}
+
+# DATA CLEANING & INTEGRITY CHECKS
+
+# Checking for Missing Values
+missing_values <- colSums(is.na(data))
+print("Missing Values in Dataset:")
+print(missing_values)
+
+# Counting the number of instances where `complt_fin` is 0 (without removal)
+zero_complt_fin_count <- sum(data$complt_fin == 0, na.rm = TRUE)
+print(paste("Number of entries where complt_fin is 0:", zero_complt_fin_count))
+
+# Flagging `complt_fin = 0` cases instead of removing them
+data_cleaned <- data %>%
+  mutate(
+    complt_fin_zero_flag = ifelse(complt_fin == 0, TRUE, FALSE)  # Flag cases for reference
+  )
+
+# Performing Logical Consistency checks
+data_cleaned <- data_cleaned %>%
+  mutate(
+    # AI's Type I & Type II errors should not exceed the actual number of loans
+    valid_ai_typeI = ai_typeI <= goodloans_num,
+    valid_ai_typeII = ai_typeII <= badloans_num,
+
+    # The sum of revised decisions (following AI or against AI) should not exceed initial completions
+    valid_complt = (revised_per_ai + revised_agst_ai) <= complt_init,
+
+    # Confidence ratings should not exceed the possible maximum rating per completed review
+    valid_confidence = confidence_init_total <= complt_init * 1000,
+
+    # Fully completed decisions should be logically consistent with both initial and final completions
+    valid_fully_complt_init = fully_complt <= complt_init,
+    valid_fully_complt_fin = fully_complt <= complt_fin,
+
+    # Ensure `goodloans_num + badloans_num = fully_complt`
+    valid_loan_complt = goodloans_num + badloans_num == fully_complt,
+
+    # Consolidating all validity checks (without removing data)
+    all_valid = valid_ai_typeI & valid_ai_typeII & valid_complt &
+                valid_confidence & valid_fully_complt_init &
+                valid_fully_complt_fin & valid_loan_complt
+  )
+
+# Creating a separate table to store invalid data entries
+invalid_data_table <- data_cleaned %>% filter(!all_valid)
+
+# Print Summary of Invalid Data Entries
+print("INVALID DATA ENTRIES:")
+print(invalid_data_table)
+
+# Keeping `data_cleaned` unchanged (NO removal of invalid entries)
+```
+
+```{r EDA, include=FALSE}
+
+# Displaying the summary of the cleaned dataset
+summary(data_cleaned)
+
+# Visualing distribution of key variables through Histogram
+ggplot(data_cleaned, aes(x = typeI_fin)) + 
+  geom_histogram(binwidth = 1, fill = "blue", alpha=0.8) + 
+  ggtitle("Distribution of Type I Errors (Final)")
+
+ggplot(data_cleaned, aes(x = typeII_fin)) + 
+  geom_histogram(binwidth = 1, fill = "blue", alpha=0.8) + 
+  ggtitle("Distribution of Type II Errors (Final)")
+
+ggplot(data_cleaned, aes(x = agree_fin)) + 
+  geom_histogram(binwidth = 1, fill = "blue", alpha=0.8) + 
+  ggtitle("Agreement Count (Final)")
+
+ggplot(data_cleaned, aes(x = revised_per_ai)) + 
+  geom_histogram(binwidth = 1, fill = "blue", alpha=0.8) + 
+  ggtitle("Revised Decisions (Per AI)")
+
+```
+
+```{r Statistical Testing, include=FALSE}
+
+# Performing Welch's t-tests for key metrics
+t_test_typeI <- t.test(typeI_fin ~ Variant, data = data_cleaned)
+t_test_typeII <- t.test(typeII_fin ~ Variant, data = data_cleaned)
+
+print(t_test_typeI)
+print(t_test_typeII)
+
+# Additional t-tests for other metrics
+t.test(revised_per_ai ~ Variant, data = data_cleaned)
+t.test(revised_agst_ai ~ Variant, data = data_cleaned)
+t.test(agree_fin ~ Variant, data = data_cleaned)
+t.test(conflict_fin ~ Variant, data = data_cleaned)
+t.test(badloans_num ~ Variant, data = data_cleaned)
+t.test(goodloans_num ~ Variant, data = data_cleaned)
+t.test(confidence_fin_total ~ Variant, data = data_cleaned)
+
+```
+
+```{r Calculations, include=FALSE}
+
+#  PERFORMING ERROR RATE CALCULATIONS
+data_cleaned <- data_cleaned %>%
+  mutate(
+    typeI_error_rate = typeI_fin / (typeI_fin + goodloans_num),
+    typeII_error_rate = typeII_fin / (typeII_fin + badloans_num)
+  )
+
+# ComparING error rates between control and treatment
+t_test_typeI_error_rate <- t.test(typeI_error_rate ~ Variant, data = data_cleaned)
+t_test_typeII_error_rate <- t.test(typeII_error_rate ~ Variant, data = data_cleaned)
+
+print(t_test_typeI_error_rate)
+print(t_test_typeII_error_rate)
+
+```
+
+```{r Visualising trends, include=FALSE}
+# VISUALING TRENDS OVER TIME
+
+# Aggregating data at the daily level
+daily_summary <- data_cleaned %>%
+  group_by(day, Variant) %>%
+  summarise(
+    mean_typeI = mean(typeI_fin),
+    mean_typeII = mean(typeII_fin)
+  )
+
+# Visualizing trends
+ggplot(daily_summary, aes(x = day, y = mean_typeI, color = Variant)) + 
+  geom_line() + 
+  ggtitle("Type I Errors Over Time") +  
+  xlab("Day") +                         
+  ylab("Mean Type I Error") +           
+  theme_minimal()
+
+ggplot(daily_summary, aes(x = day, y = mean_typeII, color = Variant)) + 
+  geom_line() + 
+  ggtitle("Type II Errors Over Time") + 
+  xlab("Day") + 
+  ylab("Mean Type II Error") + 
+  theme_minimal()
+
+# Aggregating data to track loan decisions over time
+loan_trend <- data_cleaned %>%
+  group_by(day, Variant) %>%
+  summarise(
+    mean_bad_loans = mean(badloans_num, na.rm = TRUE),
+    mean_good_loans = mean(goodloans_num, na.rm = TRUE),
+    mean_fully_completed = mean(fully_complt, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plotting trends for bad loans, good loans, and fully completed loans
+ggplot(loan_trend, aes(x = day)) +
+  geom_line(aes(y = mean_bad_loans, color = "Bad Loans"), size = 1) +
+  geom_line(aes(y = mean_good_loans, color = "Good Loans"), size = 1) +
+  geom_line(aes(y = mean_fully_completed, color = "Fully Completed"), size = 1, linetype = "dashed") +
+  facet_wrap(~ Variant) +
+  labs(title = "Loan Decision Trends Over Time",
+       x = "Day",
+       y = "Mean Loan Decisions") +
+  theme_minimal() +
+  scale_color_manual(values = c("Bad Loans" = "red", "Good Loans" = "green", "Fully Completed" = "blue"))
+
+# Visualsing AI Agreement vs. Loan Officer Confidence analysis
+
+# Scatter plot to see if AI agreement increases with loan officer confidence
+ggplot(data_cleaned, aes(x = confidence_fin_total, y = agree_fin)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "AI Agreement vs. Loan Officer Confidence",
+       x = "Total Confidence (Final)",
+       y = "AI Agreement (Final)") +
+  theme_minimal()
+
+# Visualising Decision Revision Trends
+
+# Aggregate decision revisions over time
+revision_trends <- data_cleaned %>%
+  group_by(day, Variant) %>%
+  summarise(
+    mean_revised_follow = mean(revised_per_ai, na.rm = TRUE),
+    mean_revised_against = mean(revised_agst_ai, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot decision revisions over time
+ggplot(revision_trends, aes(x = day)) +
+  geom_line(aes(y = mean_revised_follow, color = "Revised Following AI"), size = 1) +
+  geom_line(aes(y = mean_revised_against, color = "Revised Against AI"), size = 1, linetype = "dashed") +
+  facet_wrap(~ Variant) +
+  labs(title = "Decision Revision Trends Over Time",
+       x = "Day",
+       y = "Mean Revisions") +
+  theme_minimal() +
+  scale_color_manual(values = c("Revised Following AI" = "blue", "Revised Against AI" = "red"))
+
+```
+
+```{r analysis, include=FALSE}
+
+# PERFORMING CORRELATION ANALYSIS
+correlation_data <- data_cleaned[, c("typeII_fin", "typeI_fin", "badloans_num", "goodloans_num", "confidence_fin_total", "revised_per_ai","agree_fin","conflict_fin")]
+corr_matrix <- cor(correlation_data, use = "complete.obs")  
+
+ggcorrplot(corr_matrix, 
+           method = "circle", 
+           type = "lower",     
+           colors = c("blue", "white", "red"))
+```
